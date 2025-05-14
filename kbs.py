@@ -1,7 +1,6 @@
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
-    InlineKeyboardMarkup,
     InlineKeyboardButton
 )
 from aiogram.filters.callback_data import CallbackData
@@ -26,7 +25,7 @@ start_key = ReplyKeyboardMarkup(
 )
 
 
-def paginator(page: int = 0):
+def yes_or_no(page: int = 0):
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Да", callback_data=Pang(action="del", page=page).pack()),
@@ -36,7 +35,7 @@ def paginator(page: int = 0):
     return builder.as_markup()
 
 
-def otmenator(page: int = 0):
+def func_otmena(page: int = 0):
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Отмена", callback_data=Pang(action="otm", page=page).pack()),
@@ -47,12 +46,12 @@ def otmenator(page: int = 0):
 
 start_new_profile = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="/start")]], resize_keyboard=True,
                                         one_time_keyboard=True)
-write_th = ReplyKeyboardMarkup(
+edit_th = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Добавить продукт")], [KeyboardButton(text="В главное меню")]],
     resize_keyboard=True,
     one_time_keyboard=True)
 
-back_to_me = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="В главное меню")]], resize_keyboard=True,
+back_to_menu = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="В главное меню")]], resize_keyboard=True,
                                  one_time_keyboard=True)
 
 
@@ -60,7 +59,7 @@ class Old(CallbackData, prefix="older"):
     action: str
 
 
-def olginator():
+def delete_func():
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Удалить все", callback_data=Old(action="out_del").pack()),

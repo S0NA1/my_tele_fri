@@ -1,20 +1,24 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
-from config import BOT_TOKEN
-import datetime
+from config import BOT_TOKEN, UNSPLASH_ACCESS_KEY
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import sqlite3
 import kbs
 import logging
 from fnmatch import *
 import re
-from typing import Any, Awaitable, Callable, Dict
-from aiogram import BaseMiddleware
+import requests
+import warnings
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import ReplyKeyboardRemove
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback, get_user_locale
+from datetime import datetime, date
+
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 con = sqlite3.connect("product_db.db")
 cur = con.cursor()
@@ -32,6 +36,7 @@ logging.basicConfig(level=logging.INFO, filename="loggs.log", filemode="w",
                     format="%(asctime)s %(levelname)s %(message)s")
 
 logger = logging.getLogger(__name__)
+
 
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 scheduler_started = False
@@ -52,24 +57,32 @@ async def help_me(messege: Message):
 
 
 async def send_message(bot: Bot, user_id: int, chat_id: int):
+    logger.info(f"Начало выполнения send_message для user_id={user_id}, chat_id={chat_id}")
     try:
         chek = cur.execute("SELECT product, data FROM Users WHERE id = ?", (user_id,)).fetchall()
-        now_data = datetime.datetime.now().date()
+        logger.info(f"Получено {len(chek)} записей из базы данных для user_id={user_id}")
+
+        now_data = datetime.now().date()
         tre_days = []
         week_days = []
         drop_days = []
 
         for i in chek:
-            obj_data = str(i[1]).split("-")
-            first = datetime.date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
-            how_days = int(str(first - now_data).split()[0])
+            logger.info(f"Обработка записи: product={i[0]}, data={i[1]}")
+            try:
+                obj_data = str(i[1]).split("-")
+                first = date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
+                how_days = int(str(first - now_data).split()[0])
 
-            if how_days == 3:
-                tre_days.append([i[0], i[1]])
-            if how_days == 7:
-                week_days.append([i[0], i[1]])
-            if how_days < 0:
-                drop_days.append([i[0], i[1]])
+                if how_days == 3:
+                    tre_days.append([i[0], i[1]])
+                if how_days == 7:
+                    week_days.append([i[0], i[1]])
+                if how_days < 0:
+                    drop_days.append([i[0], i[1]])
+            except (ValueError, IndexError) as e:
+                logger.error(f"Ошибка обработки даты для записи {i}: {e}")
+                continue
 
         mess = ''
         if tre_days:
@@ -81,11 +94,19 @@ async def send_message(bot: Bot, user_id: int, chat_id: int):
         if not mess:
             mess += f"У Вас нет продуктов, у которых скоро закончится срок годности или просрочены"
 
-        await bot.send_message(chat_id=chat_id, text=mess.strip())
+        logger.info(f"Формирование сообщения: {mess}")
+        try:
+            await bot.send_message(chat_id=chat_id, text=mess.strip())
+            logger.info(f"Сообщение успешно отправлено в chat_id={chat_id}")
+        except Exception as send_error:
+            logger.error(f"Ошибка при отправке сообщения в chat_id={chat_id}: {send_error}")
 
     except Exception as e:
-        logger.error(f"Ошибка в send_message для пользователя {user_id}: {e}")
-        await bot.send_message(chat_id=chat_id, text="Произошла ошибка.")
+        logger.error(f"Общая ошибка в send_message для пользователя {user_id}: {e}")
+        try:
+            await bot.send_message(chat_id=chat_id, text="Произошла ошибка.")
+        except Exception as send_error:
+            logger.error(f"Ошибка при отправке сообщения об ошибке в chat_id={chat_id}: {send_error}")
 
 
 @dp.message(Command("open_choice"))
@@ -115,9 +136,9 @@ async def start_menu(message: Message, bot: Bot = bot):
             scheduler.add_job(
                 send_message,
                 trigger="cron",
-                hour=18,
-                minute=39,
-                start_date=datetime.datetime.now(),
+                hour=17,
+                minute=45,
+                start_date=datetime.now(),
                 kwargs={
                     "bot": bot,
                     "user_id": message.from_user.id,
@@ -153,13 +174,13 @@ async def start_menu(message: Message, bot: Bot = bot):
 @dp.message(Command("delete_profile"))
 async def delete_datab(message: Message):
     await message.answer(f"Вы уверены, что хотите удалить все свои данные навсегда?😣",
-                         reply_markup=kbs.paginator())
+                         reply_markup=kbs.yes_or_no())
 
 
 @dp.message(F.text.lower() == "удалить профиль")
 async def delete_datab(message: Message):
     await message.answer(f"Вы уверены, что хотите удалить все свои данные навсегда?😣",
-                         reply_markup=kbs.paginator())
+                         reply_markup=kbs.yes_or_no())
 
 
 @dp.callback_query(kbs.Pang.filter(F.action.in_(["del", "no_del"])))
@@ -174,7 +195,7 @@ async def yes_no_del(call: CallbackQuery, callback_data: kbs.Pang):
     elif callback_data.action == "del":
         if len(chek) == 0:
             await call.message.answer("У вас нет записанных продуктов, поэтому можете начинать работу сначала",
-                                      reply_markup=kbs.write_th)
+                                      reply_markup=kbs.edit_th)
         else:
             cur.execute('DELETE FROM Users WHERE id = ?', (now_id,))
             con.commit()
@@ -198,7 +219,7 @@ async def chek_product(message: Message):
     now_product = cur.execute("SELECT product, data FROM Users WHERE id = ?", (message.from_user.id,)).fetchall()
     if len(now_product) == 0:
         await message.answer("Вы еще не записали в таблицу продукты, начните заполнение сейчас!⬇️",
-                             reply_markup=kbs.write_th)
+                             reply_markup=kbs.edit_th)
     else:
         await message.answer(f'''Ваши продукты:
 {pping(now_product)}''',
@@ -208,7 +229,7 @@ async def chek_product(message: Message):
 @dp.message(F.text.lower() == "посмотреть просроченное")
 async def see_old(messege: Message):
     old_data = cur.execute("SELECT * FROM Users WHERE id = ?", (messege.from_user.id,)).fetchall()
-    now_data = datetime.datetime.now().date()
+    now_data = datetime.now().date()
     convert_result = []
 
     for i in old_data:
@@ -218,7 +239,7 @@ async def see_old(messege: Message):
                 continue
 
             obj_data = str(i[2]).split("-")
-            first = datetime.date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
+            first = date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
 
             delta = (first - now_data).days
             if delta <= 0:
@@ -234,20 +255,20 @@ async def see_old(messege: Message):
     else:
         await messege.answer(f'''Ваши просроченные продукты:
 {pping(convert_result)}''',
-                             reply_markup=kbs.olginator())
+                             reply_markup=kbs.delete_func())
 
 
 @dp.callback_query(kbs.Old.filter(F.action.in_(["out_del", "no_out"])))
 async def old_thing(call: CallbackQuery, callback_data: kbs.Old):
     if callback_data.action == "out_del":
         old_data = cur.execute("SELECT * FROM Users WHERE id = ?", (call.from_user.id,)).fetchall()
-        now_data = datetime.datetime.now().date()
+        now_data = datetime.now().date()
         convert_result = []
 
         if len(old_data) != 0:
             for i in old_data:
                 obj_data = str(i[2]).split("-")
-                first = datetime.date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
+                first = date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
                 if int(str(first - now_data).split()[0]) <= 0:
                     convert_result.append([i[1], i[2]])
 
@@ -280,10 +301,19 @@ async def del_norm(message: Message, state: FSMContext):
     if len(now_product) > 0:
         await state.set_state(Dele.del_object)
         await message.answer(f"Ваши продукты: \n{pping(now_product)}")
-        await message.answer('''Отправьте номер продукта, чтобы удалить его📲''', reply_markup=kbs.otmenator())
+
+        builder = ReplyKeyboardBuilder()
+        for i in range(len(now_product)):
+            builder.add(types.KeyboardButton(text=str(i + 1)))
+        builder.adjust(3)
+
+        builder.row(types.KeyboardButton(text="Отмена"))
+
+        await message.answer('''Отправьте номер продукта, чтобы удалить его📲''',
+                             reply_markup=builder.as_markup(resize_keyboard=True))
     else:
         await message.answer("У вас нет записанных продуктов, начните заполнять таблицу⬇️",
-                             reply_markup=kbs.write_th)
+                             reply_markup=kbs.edit_th)
 
 
 @dp.callback_query(kbs.Pang.filter(F.action.in_(["otm"])))
@@ -306,7 +336,7 @@ async def start_delete(message: Message, state: FSMContext):
         return
 
     if not message.text.isdigit():
-        await message.answer("Пожалуйста, введите номер продукта (например, 1, 2, 3).", reply_markup=kbs.otmenator())
+        await message.answer("Пожалуйста, введите номер продукта (например, 1, 2, 3).", reply_markup=kbs.func_otmena())
         return
 
     product_index = int(message.text) - 1
@@ -335,16 +365,84 @@ class Form(StatesGroup):
 @dp.message(F.text.lower() == "добавить продукт")
 async def fill_db(message: Message, state: FSMContext):
     await state.set_state(Form.obje)
-    await message.answer("Введите только название продукта⬇️", reply_markup=kbs.otmenator())
+    await message.answer("Введите только название продукта⬇️", reply_markup=kbs.func_otmena())
 
 
 @dp.message(Form.obje)
 async def name_prod(message: Message, state: FSMContext):
+    calendar = SimpleCalendar(
+        locale=await get_user_locale(message.from_user),
+        show_alerts=True
+    )
+
     await state.update_data(obje=message.text)
     await state.set_state(Form.date)
-    await message.answer(f'''Введите конец срока годности в виде {datetime.date.today()}
-(год, месяц, число)⬇️''', reply_markup=kbs.otmenator())
 
+    await message.answer(
+        f"📅 Укажите срок годности (можно выбрать прошедшую дату):\n"
+        f"Выберите дату из календаря или введите вручную в формате {date.today()}",
+        reply_markup=await calendar.start_calendar()
+    )
+
+
+@dp.callback_query(SimpleCalendarCallback.filter())
+async def process_calendar_selection(callback_query: CallbackQuery, state: FSMContext, callback_data: SimpleCalendarCallback):
+    calendar = SimpleCalendar(
+        locale=await get_user_locale(callback_query.from_user),
+        show_alerts=True
+    )
+
+    selected, date = await calendar.process_selection(callback_query, callback_data)
+    if selected:
+        formatted_date = date.strftime("%Y-%m-%d")
+        await state.update_data(date=formatted_date)
+
+        all_data = await state.get_data()
+        user_id = callback_query.from_user.id
+        product_name = all_data["obje"]
+        expiration_date = all_data["date"]
+
+        try:
+            cur.execute("INSERT INTO Users (id, product, data) VALUES (?, ?, ?)",
+                        (user_id, product_name, expiration_date))
+            con.commit()
+
+            url = "https://api.unsplash.com/search/photos"
+            headers = {"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"}
+            params = {"query": product_name, "per_page": 1}
+
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            if data["results"]:
+                image_url = data["results"][0]["urls"]["regular"]
+                await callback_query.message.answer_photo(
+                    photo=image_url,
+                    caption=f"Продукт '{product_name}' добавлен с сроком годности {expiration_date}!"
+                )
+            else:
+                await callback_query.message.answer(
+                    f"Продукт '{product_name}' добавлен с сроком годности {expiration_date}, но изображение не найдено."
+                )
+
+            await callback_query.message.answer("Супер, запись создана👍\nЧто дальше?🤔", reply_markup=kbs.start_key)
+            await state.clear()
+
+        except requests.RequestException as e:
+            logger.error(f"Ошибка при поиске изображения: {e}")
+            await callback_query.message.answer(
+                f"Продукт '{product_name}' добавлен с сроком годности {expiration_date}, но произошла ошибка при поиске изображения."
+            )
+            await callback_query.message.answer("Супер, запись создана👍\nЧто дальше?🤔", reply_markup=kbs.start_key)
+            await state.clear()
+
+        except Exception as e:
+            logger.error(f"Ошибка при вставке в базу данных: {e}")
+            await callback_query.message.answer("Произошла ошибка.")
+            await state.clear()
+
+    await callback_query.answer()
 
 chis = "0123456789-"
 
@@ -365,11 +463,15 @@ def check_data(n):
                 max_day = 28
             if day > max_day:
                 return 0
-        if month > 12:
+        if month > 12 or month < 1:
             return 0
-        if day > 31:
+        if day > 31 or day < 1:
             return 0
+    try:
+        date(year, month, day)
         return 1
+    except ValueError:
+        return 0
     return 0
 
 
@@ -403,7 +505,7 @@ async def name_da(message: Message, state: FSMContext):
         await message.reply(f'''Вы ввели дату в неправильном формате.😢
 
 ‼️Попытайтесь еще раз в формате {datetime.date.today()}
-(год, месяц, число)⬇️''', reply_markup=kbs.back_to_me)
+(год, месяц, число)⬇️''', reply_markup=kbs.back_to_menu)
 
 
 async def main():
