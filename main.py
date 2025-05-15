@@ -1,10 +1,16 @@
 import asyncio
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Dispatcher
+from aiogram import types
+from aiogram import F
+from aiogram import Bot
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
-from config import BOT_TOKEN, UNSPLASH_ACCESS_KEY
+from aiogram.types import Message
+from aiogram.types import CallbackQuery
+from config import BOT_TOKEN
+from config import UNSPLASH_ACCESS_KEY
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import sqlite3
+from aiogram.filters import StateFilter
 import kbs
 import logging
 from fnmatch import *
@@ -15,10 +21,15 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import ReplyKeyboardRemove
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback, get_user_locale
-from datetime import datetime, date
+from aiogram_calendar import SimpleCalendarCallback
+from aiogram_calendar import SimpleCalendar
+from aiogram_calendar import get_user_locale
+from datetime import datetime
+from datetime import date
 
-warnings.filterwarnings("ignore", category=ResourceWarning)
+
+warnings.filterwarnings("ignore",
+                        category=ResourceWarning)
 
 con = sqlite3.connect("product_db.db")
 cur = con.cursor()
@@ -29,10 +40,15 @@ id INTEGER NOT NULL,
 product TEXT,
 data TEXT)
 ''')
+
 con.commit()
+
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
-logging.basicConfig(level=logging.INFO, filename="loggs.log", filemode="w",
+
+logging.basicConfig(level=logging.INFO, 
+                    filename="loggs.log", 
+                    filemode="w",
                     format="%(asctime)s %(levelname)s %(message)s")
 
 logger = logging.getLogger(__name__)
@@ -43,23 +59,28 @@ scheduler_started = False
 
 
 @dp.message(Command("help"))
-async def help_me(messege: Message):
-    await messege.answer('''Чтобы открыть главную клавиатуру, выберете в меню команду 
-➡️Открыть меню выбора
+async def help_me(message: Message):
+    logger.info(f"Пользователю {message.from_user.id} нужна помощь")
+    await message.answer('''Чтобы открыть главную клавиатуру, выберите в меню команду: 
+⭕️ Открыть меню выбора       /open_choice
 
-Чтобы скрыть клавиатуру, выберите команду 
-➡️Закрыть меню выбора
+Чтобы скрыть клавиатуру, выберите команду:
+⭕️ Закрыть меню выбора       /close_choice
 
 Чтобы удалить свой профиль и данные навсегда, вы модете воспользоваться двумя способами:
-➡️команда Удалить свой профиль в меню выбора
-➡️кнопка Удалить профиль в главном меню
-‼️Данные не сохранятся‼️''', reply_markup=kbs.start_key)
+➡️команда Удалить свой профиль в меню выбора        /delete_profile
+
+➡️Нажать кнопку "удалить профиль". Будьте внимательны, Ваши ‼️Данные не сохранятся‼️
+
+🦞Если вдруг у Вас НЕ РАБОТАЮТ УВЕДОМЛЕНИЯ по какой-то причине, возможно, бот был пережапущен и требует обновления. Просто отправьте команду /start ещё раз. Все данные останутся неизменными, уведомления заработают🐥''',
+                         reply_markup=kbs.start_key)
 
 
 async def send_message(bot: Bot, user_id: int, chat_id: int):
     logger.info(f"Начало выполнения send_message для user_id={user_id}, chat_id={chat_id}")
     try:
-        chek = cur.execute("SELECT product, data FROM Users WHERE id = ?", (user_id,)).fetchall()
+        chek = cur.execute("SELECT product, data FROM Users WHERE id = ?",
+                           (user_id,)).fetchall()
         logger.info(f"Получено {len(chek)} записей из базы данных для user_id={user_id}")
 
         now_data = datetime.now().date()
@@ -72,7 +93,7 @@ async def send_message(bot: Bot, user_id: int, chat_id: int):
             try:
                 obj_data = str(i[1]).split("-")
                 first = date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
-                how_days = int(str(first - now_data).split()[0])
+                how_days = (first - now_data).days
 
                 if how_days == 3:
                     tre_days.append([i[0], i[1]])
@@ -87,49 +108,62 @@ async def send_message(bot: Bot, user_id: int, chat_id: int):
         mess = ''
         if tre_days:
             mess += f"Осталось три дня до окончания срока годности: \n {pping(tre_days)}\n\n"
+
         if week_days:
             mess += f'Осталась неделя до конца срока годности: \n {pping(week_days)}\n\n'
+
         if drop_days:
             mess += f"У Вас имеются просроченные продукты: \n {pping(drop_days)}\n"
+
         if not mess:
             mess += f"У Вас нет продуктов, у которых скоро закончится срок годности или просрочены"
 
         logger.info(f"Формирование сообщения: {mess}")
         try:
-            await bot.send_message(chat_id=chat_id, text=mess.strip())
+            await bot.send_message(chat_id=chat_id,
+                                   text=mess.strip())
+
             logger.info(f"Сообщение успешно отправлено в chat_id={chat_id}")
+
         except Exception as send_error:
             logger.error(f"Ошибка при отправке сообщения в chat_id={chat_id}: {send_error}")
 
     except Exception as e:
         logger.error(f"Общая ошибка в send_message для пользователя {user_id}: {e}")
+
         try:
             await bot.send_message(chat_id=chat_id, text="Произошла ошибка.")
+
         except Exception as send_error:
             logger.error(f"Ошибка при отправке сообщения об ошибке в chat_id={chat_id}: {send_error}")
 
 
 @dp.message(Command("open_choice"))
 async def open_menu(message: Message):
-    await message.answer('''Меню выбора открылось
+    logger.info(f"Пользователь {message.from_user.id} открыл меню выбора.")
+    await message.answer('''Меню выбора открылось 🌺
 
 Чтобы закрыть меню выбота, выберите в меню команд
-➡️Закрыть меню выбора''', reply_markup=kbs.start_key)
+➡️Закрыть меню выбора       /close_choice''',
+                         reply_markup=kbs.start_key)
 
 
 @dp.message(Command("close_choice"))
 async def close_menu(message: Message):
-    await message.answer('''Меню выбора закрылось
+    logger.info(f"Пользователь {message.from_user.id} закрыл меню выбора.")
+    await message.answer('''Меню выбора закрылось 🌷
 
 Чтобы открыть меню выбота, выберите в меню команд
-➡Открыть меню выбора''', reply_markup=ReplyKeyboardRemove())
+➡️Открыть меню выбора       /open_choice''',
+                         reply_markup=ReplyKeyboardRemove())
 
 
 @dp.message(Command("start"))
 async def start_menu(message: Message, bot: Bot = bot):
     global scheduler_started
     try:
-        chek = cur.execute("SELECT * FROM Users WHERE id = ?", (message.from_user.id,)).fetchall()
+        chek = cur.execute("SELECT * FROM Users WHERE id = ?",
+                           (message.from_user.id,)).fetchall()
 
         job_id = f"notify_{message.from_user.id}"
         if not scheduler.get_job(job_id):
@@ -147,7 +181,7 @@ async def start_menu(message: Message, bot: Bot = bot):
                 id=job_id,
                 replace_existing=True
             )
-            logger.info(f"Добавлена задача уведомления для пользователя {message.from_user.id}")
+            logger.info(f"Уведомления для пользователя {message.from_user.id} запущены")
 
         if not scheduler_started:
             scheduler.start()
@@ -156,10 +190,25 @@ async def start_menu(message: Message, bot: Bot = bot):
 
         if len(chek) == 0:
             await message.answer(f'''Добро пожаловать в бот-холодильник😊
-    ‼️ВНИМАНИЕ‼️
-    Если возникли какие-то вопросы, отправьте команду /help
-    
-    Удачного пользования🙂 ''',
+            
+С этим телеграмм-ботом Вы можете не беспокоиться о сроке годности своих продуктов. Он всё сделает за вас️ ☀️
+
+Уведомления об окончании сроков годности будут приходить за неделю, за три дня и в день окончания срока годности.
+
+Для качественной работы бота Вам потребуется всего 5 минут времени. Необходимо выбрать нужную команду из мегю кнопок и следовать инструкции.
+Для начала советую выбрать "Добавить продукт", чтобы разобраться в работе бота.
+
+При вводе продуктов, на некоторые из них будет высвечиваться картинка. Если вы будете вводить название на английском, картинки будут точнее.😊
+
+В любой момент Вы можете удалить свой профиль, но будьте внимательны, ❗️Ваши данные не сохранятся❗️, всё придётся заполнять снова 😫
+
+Также у Вас есть возможность просмотреть свои просроченные продукты и удалить их.
+
+‼️ВНИМАНИЕ‼
+
+Если возникли какие-то вопросы, отправьте команду /help
+
+Удачного пользования🙂 ''',
                                  reply_markup=kbs.start_key)
         else:
             await message.answer(
@@ -173,19 +222,22 @@ async def start_menu(message: Message, bot: Bot = bot):
 
 @dp.message(Command("delete_profile"))
 async def delete_datab(message: Message):
+    logger.info(f"Пользователь хочет {message.from_user.id} удалить профиль.")
     await message.answer(f"Вы уверены, что хотите удалить все свои данные навсегда?😣",
                          reply_markup=kbs.yes_or_no())
 
 
 @dp.message(F.text.lower() == "удалить профиль")
 async def delete_datab(message: Message):
+    logger.info(f"Пользователь {message.from_user.id} хочет удалить профиль.")
     await message.answer(f"Вы уверены, что хотите удалить все свои данные навсегда?😣",
                          reply_markup=kbs.yes_or_no())
 
 
 @dp.callback_query(kbs.Pang.filter(F.action.in_(["del", "no_del"])))
 async def yes_no_del(call: CallbackQuery, callback_data: kbs.Pang):
-    chek = cur.execute("SELECT * FROM Users WHERE id = ?", (call.from_user.id,)).fetchall()
+    chek = cur.execute("SELECT * FROM Users WHERE id = ?",
+                       (call.from_user.id,)).fetchall()
     now_id = call.from_user.id
 
     if callback_data.action == "no_del":
@@ -197,11 +249,14 @@ async def yes_no_del(call: CallbackQuery, callback_data: kbs.Pang):
             await call.message.answer("У вас нет записанных продуктов, поэтому можете начинать работу сначала",
                                       reply_markup=kbs.edit_th)
         else:
-            cur.execute('DELETE FROM Users WHERE id = ?', (now_id,))
+            cur.execute('DELETE FROM Users WHERE id = ?',
+                        (now_id,))
             con.commit()
+
             await call.message.answer(f'''Ваши данные удалены.
 
 Чтобы возобновить работу бота, нажмите на команду
+
 ➡️/start''',
                                       reply_markup=kbs.start_new_profile)
     await call.answer()
@@ -216,7 +271,10 @@ def pping(spis):
 
 @dp.message(F.text.lower() == "список моих продуктов")
 async def chek_product(message: Message):
-    now_product = cur.execute("SELECT product, data FROM Users WHERE id = ?", (message.from_user.id,)).fetchall()
+    logger.info(f"Пользователь {message.from_user.id} хочет узнать список своих продуктов.")
+    now_product = cur.execute("SELECT product, data FROM Users WHERE id = ?",
+                              (message.from_user.id,)).fetchall()
+
     if len(now_product) == 0:
         await message.answer("Вы еще не записали в таблицу продукты, начните заполнение сейчас!⬇️",
                              reply_markup=kbs.edit_th)
@@ -227,15 +285,17 @@ async def chek_product(message: Message):
 
 
 @dp.message(F.text.lower() == "посмотреть просроченное")
-async def see_old(messege: Message):
-    old_data = cur.execute("SELECT * FROM Users WHERE id = ?", (messege.from_user.id,)).fetchall()
+async def see_old(message: Message):
+    logger.info(f"Пользователь {message.from_user.id} хочет узнать список своих просроченных продуктов.")
+    old_data = cur.execute("SELECT * FROM Users WHERE id = ?",
+                           (message.from_user.id,)).fetchall()
     now_data = datetime.now().date()
     convert_result = []
 
     for i in old_data:
         try:
             if not re.match(r"\d{4}-\d{2}-\d{2}", str(i[2])):
-                logging.warning(f"Некорректный формат даты: {i[2]}")
+                logging.warning(f"Неверный формат даты: {i[2]}")
                 continue
 
             obj_data = str(i[2]).split("-")
@@ -250,10 +310,13 @@ async def see_old(messege: Message):
 
     if len(convert_result) == 0:
         all_product = len(old_data)
-        await messege.answer(f"У вас нет просроченных продуктов🌱 (всего продуктов: {all_product})",
+        await message.answer(f'''У вас нет просроченных продуктов🌱
+        
+Всего продуктов: {all_product}''',
                              reply_markup=kbs.start_key)
+
     else:
-        await messege.answer(f'''Ваши просроченные продукты:
+        await message.answer(f'''Ваши просроченные продукты:
 {pping(convert_result)}''',
                              reply_markup=kbs.delete_func())
 
@@ -261,7 +324,8 @@ async def see_old(messege: Message):
 @dp.callback_query(kbs.Old.filter(F.action.in_(["out_del", "no_out"])))
 async def old_thing(call: CallbackQuery, callback_data: kbs.Old):
     if callback_data.action == "out_del":
-        old_data = cur.execute("SELECT * FROM Users WHERE id = ?", (call.from_user.id,)).fetchall()
+        old_data = cur.execute("SELECT * FROM Users WHERE id = ?",
+                               (call.from_user.id,)).fetchall()
         now_data = datetime.now().date()
         convert_result = []
 
@@ -269,11 +333,13 @@ async def old_thing(call: CallbackQuery, callback_data: kbs.Old):
             for i in old_data:
                 obj_data = str(i[2]).split("-")
                 first = date(int(obj_data[0]), int(obj_data[1]), int(obj_data[2]))
-                if int(str(first - now_data).split()[0]) <= 0:
+                how_days = (first - now_data).days
+                if how_days<= 0:
                     convert_result.append([i[1], i[2]])
 
         for i in convert_result:
-            cur.execute("DELETE FROM Users WHERE (product, data) = (?, ?)", (i[0], i[1]))
+            cur.execute("DELETE FROM Users WHERE (product, data) = (?, ?)",
+                        (i[0], i[1]))
             con.commit()
         await call.message.answer("Все просроченное удалено✅",
                                   reply_markup=kbs.start_key)
@@ -286,8 +352,9 @@ async def old_thing(call: CallbackQuery, callback_data: kbs.Old):
 
 
 @dp.message(F.text.lower() == "в главное меню")
-async def beck_to_men(messege: Message):
-    await messege.answer("Выберите действие⬇️",
+async def beck_to_men(message: Message):
+    logger.info(f"Пользователь {message.from_user.id} хочет вернуться в главное меню.")
+    await message.answer("Выберите действие⬇️",
                          reply_markup=kbs.start_key)
 
 
@@ -297,7 +364,11 @@ class Dele(StatesGroup):
 
 @dp.message(F.text.lower() == "удалить продукт")
 async def del_norm(message: Message, state: FSMContext):
-    now_product = cur.execute("SELECT product, data FROM Users WHERE id = ?", (message.from_user.id,)).fetchall()
+    logger.info(f"Пользователь {message.from_user.id} хочет удалить какой-то продукт.")
+
+    now_product = cur.execute("SELECT product, data FROM Users WHERE id = ?",
+                              (message.from_user.id,)).fetchall()
+
     if len(now_product) > 0:
         await state.set_state(Dele.del_object)
         await message.answer(f"Ваши продукты: \n{pping(now_product)}")
@@ -331,12 +402,14 @@ async def start_delete(message: Message, state: FSMContext):
                               (message.from_user.id,)).fetchall()
 
     if message.text.lower() == "отмена":
-        await message.answer("Удаление отменено.", reply_markup=kbs.start_key)
+        await message.answer("Удаление отменено.",
+                             reply_markup=kbs.start_key)
         await state.clear()
         return
 
     if not message.text.isdigit():
-        await message.answer("Пожалуйста, введите номер продукта (например, 1, 2, 3).", reply_markup=kbs.func_otmena())
+        await message.answer("Пожалуйста, введите номер продукта (например, 1, 2, 3).",
+                             reply_markup=kbs.func_otmena())
         return
 
     product_index = int(message.text) - 1
@@ -345,7 +418,8 @@ async def start_delete(message: Message, state: FSMContext):
         return
 
     now_work = now_product[product_index]
-    cur.execute("DELETE FROM Users WHERE (id, product, data) = (?, ?, ?)", (now_work[0], now_work[1], now_work[2]))
+    cur.execute("DELETE FROM Users WHERE (id, product, data) = (?, ?, ?)",
+                (now_work[0], now_work[1], now_work[2]))
     con.commit()
 
     await message.answer('''Продукт удалён✅
@@ -364,12 +438,17 @@ class Form(StatesGroup):
 
 @dp.message(F.text.lower() == "добавить продукт")
 async def fill_db(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} хочет добавить какой-то продукт.")
+
     await state.set_state(Form.obje)
-    await message.answer("Введите только название продукта⬇️", reply_markup=kbs.func_otmena())
+    await message.answer("Введите только название продукта⬇️",
+                         reply_markup=kbs.func_otmena())
 
 
 @dp.message(Form.obje)
 async def name_prod(message: Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} хочет указать срок годности нового продукта.")
+
     calendar = SimpleCalendar(
         locale=await get_user_locale(message.from_user),
         show_alerts=True
@@ -379,14 +458,16 @@ async def name_prod(message: Message, state: FSMContext):
     await state.set_state(Form.date)
 
     await message.answer(
-        f"📅 Укажите срок годности (можно выбрать прошедшую дату):\n"
-        f"Выберите дату из календаря или введите вручную в формате {date.today()}",
+        f'''📅 Укажите срок годности:
+
+Выберите дату из календаря или введите вручную в формате {date.today()}''',
         reply_markup=await calendar.start_calendar()
     )
 
 
 @dp.callback_query(SimpleCalendarCallback.filter())
-async def process_calendar_selection(callback_query: CallbackQuery, state: FSMContext, callback_data: SimpleCalendarCallback):
+async def process_calendar_selection(callback_query: CallbackQuery, state: FSMContext,
+                                     callback_data: SimpleCalendarCallback):
     calendar = SimpleCalendar(
         locale=await get_user_locale(callback_query.from_user),
         show_alerts=True
@@ -399,6 +480,7 @@ async def process_calendar_selection(callback_query: CallbackQuery, state: FSMCo
 
         all_data = await state.get_data()
         user_id = callback_query.from_user.id
+
         product_name = all_data["obje"]
         expiration_date = all_data["date"]
 
@@ -423,18 +505,33 @@ async def process_calendar_selection(callback_query: CallbackQuery, state: FSMCo
                 )
             else:
                 await callback_query.message.answer(
-                    f"Продукт '{product_name}' добавлен с сроком годности {expiration_date}, но изображение не найдено."
+                    '''Продукт '{product_name}' добавлен с сроком годности {expiration_date}.
+
+Картинка не найдена 🥺
+
+Если хотите увидеть изображение, в следующий раз введите название на английском языке'''
                 )
 
-            await callback_query.message.answer("Супер, запись создана👍\nЧто дальше?🤔", reply_markup=kbs.start_key)
+            await callback_query.message.answer('''Супер, запись создана👍
+
+Что дальше?🤔''',
+                                                reply_markup=kbs.start_key)
             await state.clear()
 
         except requests.RequestException as e:
             logger.error(f"Ошибка при поиске изображения: {e}")
             await callback_query.message.answer(
-                f"Продукт '{product_name}' добавлен с сроком годности {expiration_date}, но произошла ошибка при поиске изображения."
+                f'''Продукт '{product_name}' добавлен с сроком годности {expiration_date}
+                 
+Картинка не найдена 🥺
+
+Если хотите увидеть изображение, в следующий раз введите название на английском языке'''
             )
-            await callback_query.message.answer("Супер, запись создана👍\nЧто дальше?🤔", reply_markup=kbs.start_key)
+
+            await callback_query.message.answer(
+                '''Супер, запись создана👍
+Что дальше?🤔''',
+                reply_markup=kbs.start_key)
             await state.clear()
 
         except Exception as e:
@@ -443,6 +540,7 @@ async def process_calendar_selection(callback_query: CallbackQuery, state: FSMCo
             await state.clear()
 
     await callback_query.answer()
+
 
 chis = "0123456789-"
 
@@ -500,12 +598,34 @@ async def name_da(message: Message, state: FSMContext):
             return
 
         await state.clear()
-        await message.answer("Супер, запись создана👍\nЧто дальше?🤔", reply_markup=kbs.start_key)
+        await message.answer(
+            ''''Супер, запись создана👍
+
+Что дальше?🤔''',
+            reply_markup=kbs.start_key)
+
     else:
-        await message.reply(f'''Вы ввели дату в неправильном формате.😢
+        await message.reply(
+            f'''Вы ввели дату в неправильном формате.😢
 
 ‼️Попытайтесь еще раз в формате {datetime.date.today()}
-(год, месяц, число)⬇️''', reply_markup=kbs.back_to_menu)
+(год, месяц, число)⬇️''',
+            reply_markup=kbs.back_to_menu)
+
+
+@dp.message(StateFilter(None))
+async def handle_unexpected(message: Message):
+    if message.text:
+        await message.answer(
+            '''Я не понимаю эту команду 😢
+            
+Используйте     ➡️/help для списка справок
+или выберите действия из меню    ➡️/open_choice''',
+            reply_markup=kbs.start_key
+        )
+    else:
+        await message.answer("Пожалуйста, используйте команды из меню выбора или из меню кнопок",
+                             reply_markup=kbs.start_key)
 
 
 async def main():
